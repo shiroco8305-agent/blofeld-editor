@@ -45,7 +45,7 @@ input[type=range]:focus{outline:none}
 .matrixrow{display:grid;grid-template-columns:24px 1.2fr 1.2fr 1fr 44px;gap:6px;align-items:center;padding:2px 0}
 .matrixrow .idx{color:var(--dim);font-size:10px;text-align:right}
 .matrixrow .pval{font-size:11px;color:var(--accent2);text-align:right}
-#kbd{display:flex;user-select:none;margin-top:8px;position:relative;height:90px}
+#kbd{display:flex;user-select:none;-webkit-user-select:none;margin-top:8px;position:relative;height:90px;touch-action:none}
 .wk{flex:1;background:#e8e8e8;border:1px solid #555;border-radius:0 0 4px 4px;position:relative;cursor:pointer}
 .wk:active,.wk.on{background:var(--accent)}
 .bk{position:absolute;top:0;width:62%;height:55%;background:#111;border:1px solid #000;
@@ -230,7 +230,15 @@ const $=id=>document.getElementById(id);
 
 function setStatus(txt,ok){const s=$("midistatus");s.textContent=txt;s.className=ok?"ok":"";}
 
+// iPadOS reports itself as a Mac; touch points give it away. All iOS browsers (incl. Chrome) are WebKit = no Web MIDI.
+const IS_IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+// iOS file picker greys out unknown extensions like .syx when accept is set
+if(IS_IOS) $("fileinput").removeAttribute("accept");
 async function initMIDI(){
+  if(!navigator.requestMIDIAccess){
+    setStatus(IS_IOS?"iPad/iPhone 브라우저는 Web MIDI 미지원 — 편집과 .syx 저장/불러오기만 가능":"이 브라우저는 Web MIDI 미지원 (Chrome/Edge에서 여세요)",false);
+    return;
+  }
   try{
     midi=await navigator.requestMIDIAccess({sysex:true});
     midi.onstatechange=fillPorts; fillPorts();
@@ -488,7 +496,8 @@ $("btnSave").onclick=()=>{
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download=(patchName()||"blofeld_patch").replace(/[^\w\- ]/g,"").trim().replace(/ +/g,"_")+".syx";
-  a.click();URL.revokeObjectURL(a.href);
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
 $("btnLoad").onclick=()=>$("fileinput").click();
 $("fileinput").onchange=async e=>{
