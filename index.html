@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blofeld Editor</title>
+<style>
+:root{
+  --bg:#16181d; --panel:#1f232b; --panel2:#262b35; --line:#343b48;
+  --text:#d7dce5; --dim:#8a93a3; --accent:#ffb02e; --accent2:#4fc3f7;
+  --green:#7ed87e; --red:#ef6b6b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 "Helvetica Neue",Arial,sans-serif;padding:14px}
+h1{font-size:20px;margin:0;letter-spacing:2px;color:var(--accent)}
+h1 small{color:var(--dim);font-size:12px;letter-spacing:0;margin-left:10px}
+#topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:12px}
+#topbar label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+select,button,input[type=text],input[type=number]{
+  background:var(--panel2);color:var(--text);border:1px solid var(--line);
+  border-radius:6px;padding:5px 8px;font-size:12px}
+button{cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:bold}
+button.primary:hover{filter:brightness(1.1);color:#000}
+#midistatus{margin-left:auto;font-size:12px;color:var(--red)}
+#midistatus.ok{color:var(--green)}
+#sections{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px 12px}
+.panel.wide{grid-column:1/-1}
+.panel h2{font-size:12px;margin:0 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;
+  border-bottom:1px solid var(--line);padding-bottom:6px}
+.prow{display:grid;grid-template-columns:108px 1fr 52px;gap:8px;align-items:center;padding:2px 0}
+.prow .pname{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .pval{font-size:11px;color:var(--accent2);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.prow select{width:100%}
+input[type=range]{-webkit-appearance:none;width:100%;height:22px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:5px;background:#3a4150;border-radius:3px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--accent);margin-top:-5px;border:2px solid #000;cursor:pointer}
+input[type=range]:focus{outline:none}
+.subhead{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;
+  margin:8px 0 3px;border-bottom:1px dashed var(--line)}
+.matrixrow{display:grid;grid-template-columns:24px 1.2fr 1.2fr 1fr 44px;gap:6px;align-items:center;padding:2px 0}
+.matrixrow .idx{color:var(--dim);font-size:10px;text-align:right}
+.matrixrow .pval{font-size:11px;color:var(--accent2);text-align:right}
+#kbd{display:flex;user-select:none;margin-top:8px;position:relative;height:90px}
+.wk{flex:1;background:#e8e8e8;border:1px solid #555;border-radius:0 0 4px 4px;position:relative;cursor:pointer}
+.wk:active,.wk.on{background:var(--accent)}
+.bk{position:absolute;top:0;width:62%;height:55%;background:#111;border:1px solid #000;
+  border-radius:0 0 3px 3px;left:69%;z-index:2;cursor:pointer}
+.bk:active,.bk.on{background:var(--accent)}
+.wkwrap{flex:1;position:relative}
+#namebox{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#patchname{width:190px;font-family:monospace;letter-spacing:2px;text-transform:none}
+.hint{color:var(--dim);font-size:11px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>BLOFELD<small>SysEx Editor</small></h1>
+  <label>MIDI Out</label><select id="midiout"></select>
+  <label>MIDI In</label><select id="midiin"></select>
+  <label>Ch</label><select id="midich"></select>
+  <button id="btnRequest" class="primary">⟳ 패치 받기</button>
+  <button id="btnSendAll">전체 전송</button>
+  <button id="btnInit">Init</button>
+  <button id="btnLoad">.syx 열기</button>
+  <button id="btnSave">.syx 저장</button>
+  <input type="file" id="fileinput" accept=".syx,.mid" style="display:none">
+  <span id="midistatus">MIDI 연결 안 됨</span>
+</div>
+
+<div class="panel wide" style="margin-bottom:12px">
+  <div id="namebox">
+    <h2 style="margin:0;border:0;padding:0">Patch</h2>
+    <input type="text" id="patchname" maxlength="16" placeholder="Patch Name">
+    <label style="color:var(--dim);font-size:11px">CATEGORY</label><select id="patchcat"></select>
+    <span class="hint">노브를 움직이면 SNDP 메시지가 Blofeld 에디트 버퍼로 즉시 전송됩니다.</span>
+  </div>
+  <div id="kbd"></div>
+</div>
+
+<div id="sections"></div>
+
+<script>
+"use strict";
+/* ============ Blofeld SysEx (spec v1.04) ============ */
+const IDW=0x3E, IDE=0x13;
+let DEV=0x7F;                 // broadcast device id
+const state=new Uint8Array(383);
+
+/* ---------- option lists from spec section 4 ---------- */
+const SHAPES=["off","Pulse","Saw","Triangle","Sine","Alt 1","Alt 2","Resonant","Resonant2","MalletSyn","Sqr-Sweep","Bellish","Pul-Sweep","Saw-Sweep","MellowSaw","Feedback","Add Harm","Reso 3 HP","Wind Syn","High Harm","Clipper","Organ Syn","SquareSaw","Formant 1","Polated","Transient","ElectricP","Robotic","StrongHrm","PercOrgan","ClipSweep","ResoHarms","2 Echoes","Formant 2","FmntVocal","MicroSync","Micro PWM","Glassy","Square HP","SawSync 1","SawSync 2","SawSync 3","PulSync 1","PulSync 2","PulSync 3","SinSync 1","SinSync 2","SinSync 3","PWM Pulse","PWM Saw","Fuzz Wave","Distorted","HeavyFuzz","Fuzz Sync","K+Strong1","K+Strong2","K+Strong3","1-2-3-4-5","19/twenty","Wavetrip1","Wavetrip2","Wavetrip3","Wavetrip4","MaleVoice","Low Piano","ResoSweep","Xmas Bell","FM Piano","Fat Organ","Vibes","Chorus 2","True PWM","UpperWaves"];
+const FMSRC=["off","Osc 1","Osc 2","Osc 3","Noise","LFO 1","LFO 2","LFO 3","FilterEnv","AmpEnv","Env3","Env4"];
+const MODSRC=["off","LFO 1","LFO1*MW","LFO 2","LFO2*Press","LFO 3","FilterEnv","AmpEnv","Env3","Env4","Keytrack","Velocity","Rel. Velo","Pressure","Poly Press","Pitch Bend","Mod Wheel","Sustain","Foot Ctrl","BreathCtrl","Control W","Control X","Control Y","Control Z","Unisono V.","Modifier 1","Modifier 2","Modifier 3","Modifier 4","minimum","MAXIMUM"];
+const MODDST=["Pitch","O1 Pitch","O1 FM","O1 PW/Wave","O2 Pitch","O2 FM","O2 PW/Wave","O3 Pitch","O3 FM","O3 PW","O1 Level","O1 Balance","O2 Level","O2 Balance","O3 Level","O3 Balance","RMod Level","RMod Bal.","NoiseLevel","Noise Bal.","F1 Cutoff","F1 Reson.","F1 FM","F1 Drive","F1 Pan","F2 Cutoff","F2 Reson.","F2 FM","F2 Drive","F2 Pan","Volume","LFO1Speed","LFO2Speed","LFO3Speed","FE Attack","FE Decay","FE Sustain","FE Release","AE Attack","AE Decay","AE Sustain","AE Release","E3 Attack","E3 Decay","E3 Sustain","E3 Release","E4 Attack","E4 Decay","E4 Sustain","E4 Release","M1 Amount","M2 Amount","M3 Amount","M4 Amount"];
+const FILTYPE=["Bypass","LP 24dB","LP 12dB","BP 24dB","BP 12dB","HP 24dB","HP 12dB","Notch24dB","Notch12dB","Comb+","Comb-","PPG LP"];
+const LFOSHAPE=["Sine","Triangle","Square","Saw","Random","S&H"];
+const GLIDEMODE=["Portamento","fingered P","Glissando","fingered G"];
+const DRIVECURVE=["Clipping","Tube","Hard","Medium","Soft","Pickup 1","Pickup 2","Rectifier","Square","Binary","Overflow","Sine Shaper","Osc 1 Mod"];
+const ENVMODE=["ADSR","ADS1DS2R","One Shot","Loop S1S2","Loop All"];
+const MODOP=["+","-","*","AND","OR","XOR","MAX","min"];
+const CATEGORY=["Init","Arp","Atmo","Bass","Drum","FX","Keys","Lead","Mono","Pad","Perc","Poly","Seq"];
+const FXTYPE1=["Bypass","Chorus","Flanger","Phaser","Overdrive","Triple FX"];
+const FXTYPE2=[...FXTYPE1,"Delay","Clk.Delay","Reverb"];
+const ARPCLOCK=["1/96","1/48","1/32","1/16T","1/32.","1/16","1/8T","1/16.","1/8","1/4T","1/8.","1/4","1/2T","1/4.","1/2","1/1T","1/2.","1 bar","1.5 bars","2 bars","2.5 bars","3 bars","3.5 bars","4 bars","5 bars","6 bars","7 bars","8 bars","9 bars","10 bars","12 bars","14 bars","16 bars","18 bars","20 bars","24 bars","28 bars","32 bars","36 bars","40 bars","48 bars","56 bars","64 bars"];
+const ARPDIR=["Up","Down","Alt Up","Alt Down"];
+const ARPSORT=["as played","reversed","Key Lo>Hi","Key Hi>Lo","Vel Lo>Hi","Vel Hi>Lo"];
+const ARPVEL=["Each Note","First Note","Last Note","fix 32","fix 64","fix 100","fix 127"];
+
+/* ---------- value formatters ---------- */
+const F={
+  raw:v=>v,
+  s64:v=>v-64,                                  // -64..+63
+  semi:v=>(v-64>0?"+":"")+(v-64),               // -12..+12 etc.
+  kt:v=>Math.round((v-64)*3.125)+"%",           // -200..+196 %
+  oct:v=>["128'","64'","32'","16'","8'","4'","2'","1'","1/2'"][Math.round((v-16)/12)]||v,
+  bal:v=>v===64?"mid":(v<64?"F1 "+(64-v):"F2 "+(v-64)),
+  pan:v=>v===64?"C":(v<64?"L"+(64-v):"R"+(v-64)),
+  onoff:v=>v?"on":"off",
+  phase:v=>v===0?"free":Math.round((v-1)*355/126)+"°",
+  tempo:v=>{const t=[40+v*2]; return (v<=63? 40+v*2 : 168+(v-64)*2);}, // approx 40..300
+};
+/* ---------- parameter catalogue: [index, label, kind, extra] ----------
+   kind: 'r' range slider {min,max,fmt}, 'c' choice select {opts,offset} */
+function R(idx,label,min=0,max=127,fmt="raw"){return {idx,label,t:"r",min,max,fmt};}
+function C(idx,label,opts,base=0){return {idx,label,t:"c",opts,base};}
+const OCTV=[16,28,40,52,64,76,88,100,112];
+
+function oscSection(n){
+  const b=1+16*(n-1);
+  const s=[
+    {idx:b+7,label:"Shape",t:"c",opts:(n===3?SHAPES.slice(0,5):SHAPES),base:0},
+    {idx:b+0,label:"Octave",t:"c",opts:OCTV.map(v=>F.oct(v)),vals:OCTV},
+    R(b+1,"Semitone",52,76,"semi"), R(b+2,"Detune",0,127,"s64"),
+    R(b+8,"Pulsewidth"), C(b+9,"PWM Source",MODSRC), R(b+10,"PWM Amount",0,127,"s64"),
+    C(b+5,"FM Source",FMSRC), R(b+6,"FM Amount"),
+    R(b+15,"Brilliance"), R(b+4,"Keytrack",0,127,"kt"), R(b+3,"Bend Range",40,88,"semi"),
+  ];
+  if(n!==3) s.push(C(b+13,"Limit WT",["on","off"]));
+  return {title:"Oscillator "+n, params:s};
+}
+function filterSection(n){
+  const b=n===1?77:97;
+  return {title:"Filter "+n, params:[
+    C(b,"Type",FILTYPE), R(b+1,"Cutoff"), R(b+3,"Resonance"),
+    R(b+4,"Drive"), C(b+5,"Drive Curve",DRIVECURVE),
+    R(b+9,"Keytrack",0,127,"kt"), R(b+10,"Env Amount",0,127,"s64"), R(b+11,"Env Velocity",0,127,"s64"),
+    C(b+12,"Mod Source",MODSRC), R(b+13,"Mod Amount",0,127,"s64"),
+    C(b+14,"FM Source",FMSRC), R(b+15,"FM Amount"),
+    R(b+16,"Pan",0,127,"pan"), C(b+17,"Pan Source",MODSRC), R(b+18,"Pan Amount",0,127,"s64"),
+  ]};
+}
+function envSection(name,b){
+  return {title:name, params:[
+    {idx:b,label:"Mode",t:"env"},
+    R(b+3,"Attack"), R(b+4,"Attack Level"), R(b+5,"Decay"), R(b+6,"Sustain"),
+    R(b+7,"Decay 2"), R(b+8,"Sustain 2"), R(b+9,"Release"),
+  ]};
+}
+function lfoSection(n){
+  const b=160+12*(n-1);
+  return {title:"LFO "+n, params:[
+    C(b,"Shape",LFOSHAPE), R(b+1,"Speed"),
+    C(b+3,"Sync",["off","on"]), C(b+4,"Clocked",["off","on"]),
+    R(b+5,"Start Phase",0,127,"phase"), R(b+6,"Delay"), R(b+7,"Fade",0,127,"s64"),
+    R(b+10,"Keytrack",0,127,"kt"),
+  ]};
+}
+/* effect parameter layouts per type — offsets relative to fx type index */
+const FXPARAMS={
+  1:[[2,"Speed"],[3,"Depth"]],
+  2:[[2,"Speed"],[3,"Depth"],[6,"Feedback"],[10,"Polarity","pol"]],
+  3:[[2,"Speed"],[3,"Depth"],[6,"Feedback"],[7,"Center"],[8,"Spacing"],[10,"Polarity","pol"]],
+  4:[[3,"Drive"],[4,"Post Gain"],[7,"Cutoff"],[11,"Curve","curve"]],
+  5:[[2,"Speed"],[3,"Depth"],[5,"Chorus Mix"],[6,"Sample&Hold"],[7,"Overdrive"]],
+  6:[[5,"Length"],[6,"Feedback"],[7,"Cutoff"],[10,"Polarity","pol"],[11,"Spread","s64"]],
+  7:[[6,"Feedback"],[7,"Cutoff"],[10,"Polarity","pol"],[11,"Spread","s64"],[12,"Length","dlylen"]],
+  8:[[2,"Size"],[3,"Shape"],[4,"Decay"],[7,"Lowpass"],[8,"Highpass"],[9,"Diffusion"],[10,"Damping"]],
+};
+
+const SECTIONS=[
+  oscSection(1), oscSection(2), oscSection(3),
+  {title:"Osc Common / Glide", params:[
+    C(49,"Osc2 Sync→O3",["off","on"]),
+    C(50,"Pitch Mod Src",MODSRC), R(51,"Pitch Mod Amt",0,127,"s64"),
+    C(53,"Glide",["off","on"]), C(56,"Glide Mode",GLIDEMODE), R(57,"Glide Rate"),
+    {idx:58,label:"Allocation",t:"alloc"},
+    R(59,"Unisono Detune"),
+  ]},
+  {title:"Mixer", params:[
+    R(61,"Osc 1 Level"), R(62,"Osc 1 Balance",0,127,"bal"),
+    R(63,"Osc 2 Level"), R(64,"Osc 2 Balance",0,127,"bal"),
+    R(65,"Osc 3 Level"), R(66,"Osc 3 Balance",0,127,"bal"),
+    R(67,"Noise Level"), R(68,"Noise Balance",0,127,"bal"), R(69,"Noise Colour",0,127,"s64"),
+    R(71,"RingMod Level"), R(72,"RingMod Bal.",0,127,"bal"),
+  ]},
+  filterSection(1), filterSection(2),
+  {title:"Filter Routing / Amplifier", params:[
+    C(117,"Routing",["parallel","serial"]),
+    R(121,"Volume"), R(122,"Velocity",0,127,"s64"),
+    C(123,"Mod Source",MODSRC), R(124,"Mod Amount",0,127,"s64"),
+  ]},
+  envSection("Filter Envelope",196), envSection("Amp Envelope",208),
+  envSection("Envelope 3",220), envSection("Envelope 4",232),
+  lfoSection(1), lfoSection(2), lfoSection(3),
+  {title:"Effect 1", params:[{idx:128,label:"Type",t:"fx",fx:1}]},
+  {title:"Effect 2", params:[{idx:144,label:"Type",t:"fx",fx:2}]},
+  {title:"Arpeggiator", params:[
+    C(311,"Mode",["off","on","One Shot","Hold"]),
+    C(312,"Pattern",["off",...Array.from({length:16},(_,i)=>""+(i+1))]),
+    C(314,"Clock",ARPCLOCK),
+    R(315,"Length",0,43,v=>v===43?"legato":v), R(326,"Tempo",0,127,"tempo"),
+    C(316,"Octave",Array.from({length:10},(_,i)=>""+(i+1))),
+    C(317,"Direction",ARPDIR), C(318,"Sort Order",ARPSORT), C(319,"Velocity",ARPVEL),
+    R(320,"Timing Factor"),
+    C(322,"Ptn Reset",["off","on"]),
+    C(323,"Ptn Length",Array.from({length:16},(_,i)=>""+(i+1))),
+  ]},
+  {title:"Modifiers", params:[{t:"modifiers"}]},
+  {title:"Modulation Matrix", params:[{t:"matrix"}], wide:true},
+];
+
+/* ============ MIDI ============ */
+let midi=null, out=null, inp=null, channel=0;
+const $=id=>document.getElementById(id);
+
+function setStatus(txt,ok){const s=$("midistatus");s.textContent=txt;s.className=ok?"ok":"";}
+
+async function initMIDI(){
+  try{
+    midi=await navigator.requestMIDIAccess({sysex:true});
+    midi.onstatechange=fillPorts; fillPorts();
+  }catch(e){ setStatus("Web MIDI 사용 불가 (Chrome/Edge에서 여세요): "+e.message,false); }
+}
+function fillPorts(){
+  const os=$("midiout"), is=$("midiin");
+  os.innerHTML=""; is.innerHTML="";
+  for(const p of midi.outputs.values()){const o=document.createElement("option");o.value=p.id;o.textContent=p.name;os.appendChild(o);}
+  for(const p of midi.inputs.values()){const o=document.createElement("option");o.value=p.id;o.textContent=p.name;is.appendChild(o);}
+  const pref=[...midi.outputs.values()].find(p=>/blofeld/i.test(p.name));
+  if(pref) os.value=pref.id;
+  const prefi=[...midi.inputs.values()].find(p=>/blofeld/i.test(p.name));
+  if(prefi) is.value=prefi.id;
+  pickPorts();
+}
+function pickPorts(){
+  out=midi?midi.outputs.get($("midiout").value):null;
+  if(inp) inp.onmidimessage=null;
+  inp=midi?midi.inputs.get($("midiin").value):null;
+  if(inp) inp.onmidimessage=onMIDI;
+  setStatus(out?("연결됨: "+out.name):"출력 포트 없음",!!out);
+}
+$("midiout").onchange=$("midiin").onchange=pickPorts;
+const chSel=$("midich");
+for(let i=0;i<16;i++){const o=document.createElement("option");o.value=i;o.textContent=i+1;chSel.appendChild(o);}
+chSel.onchange=()=>channel=+chSel.value;
+
+function sendParam(idx,val){
+  state[idx]=val&0x7F;
+  if(out) out.send([0xF0,IDW,IDE,DEV,0x20,0x00,(idx>>7)&0x7F,idx&0x7F,val&0x7F,0xF7]);
+}
+function requestDump(){
+  if(!out){alert("MIDI 출력 포트를 먼저 선택하세요.");return;}
+  out.send([0xF0,IDW,IDE,DEV,0x00,0x7F,0x00,0xF7]); // SNDR: sound mode edit buffer
+}
+function checksum(data){let s=0;for(const b of data)s=(s+b)&0xFF;return s&0x7F;}
+function buildSNDD(bb=0x7F,nn=0x00){
+  const msg=[0xF0,IDW,IDE,0x00,0x10,bb,nn,...state,checksum(state),0xF7];
+  return new Uint8Array(msg);
+}
+function sendAll(){
+  if(!out){alert("MIDI 출력 포트를 먼저 선택하세요.");return;}
+  out.send(buildSNDD());
+}
+function onMIDI(e){
+  const d=e.data;
+  if(d[0]!==0xF0||d[1]!==IDW||d[2]!==IDE) return;
+  const idm=d[4];
+  if(idm===0x10 && d.length>=390){            // SNDD
+    for(let i=0;i<383;i++) state[i]=d[7+i];
+    refreshUI(); setStatus("패치 수신 완료: "+patchName(),true);
+  }else if(idm===0x20 && d.length>=10){       // SNDP echo from hardware
+    const idx=(d[6]<<7)|d[7];
+    if(idx<383){ state[idx]=d[8]; refreshUI(idx); }
+  }
+}
+function noteOn(n){ if(out) out.send([0x90|channel,n,100]); }
+function noteOff(n){ if(out) out.send([0x80|channel,n,0]); }
+
+/* ============ UI 빌드 ============ */
+const controls={};   // idx -> update function
+function fmt(fmtRef,v){ return typeof fmtRef==="function"?fmtRef(v):F[fmtRef](v); }
+
+function makeRow(p,container){
+  if(p.t==="r"){
+    const row=document.createElement("div");row.className="prow";
+    const name=document.createElement("div");name.className="pname";name.textContent=p.label;
+    const sl=document.createElement("input");sl.type="range";sl.min=p.min;sl.max=p.max;sl.value=state[p.idx];
+    const val=document.createElement("div");val.className="pval";val.textContent=fmt(p.fmt,state[p.idx]);
+    sl.oninput=()=>{sendParam(p.idx,+sl.value);val.textContent=fmt(p.fmt,+sl.value);};
+    sl.ondblclick=()=>{const def=p.min<=64&&p.max>=64?64:p.min;sl.value=def;sl.oninput();};
+    row.append(name,sl,val);container.appendChild(row);
+    controls[p.idx]=()=>{sl.value=state[p.idx];val.textContent=fmt(p.fmt,state[p.idx]);};
+  }else if(p.t==="c"){
+    const row=document.createElement("div");row.className="prow";
+    const name=document.createElement("div");name.className="pname";name.textContent=p.label;
+    const sel=document.createElement("select");
+    p.opts.forEach((o,i)=>{const el=document.createElement("option");el.value=p.vals?p.vals[i]:i;el.textContent=o;sel.appendChild(el);});
+    const val=document.createElement("div");val.className="pval";
+    sel.onchange=()=>sendParam(p.idx,+sel.value);
+    row.append(name,sel,val);container.appendChild(row);
+    controls[p.idx]=()=>{sel.value=state[p.idx];};
+  }else if(p.t==="env"){          // 0ttmmmmm
+    const b=p.idx;
+    const modeP={idx:b,label:"Mode",t:"c",opts:ENVMODE};
+    makeCompound(container,b,[
+      ["Mode",ENVMODE,v=>v&0x1F,(old,sel)=>(old&0x20)|sel],
+      ["Trigger",["normal","single"],v=>(v>>5)&1,(old,sel)=>(old&0x1F)|(sel<<5)],
+    ]);
+  }else if(p.t==="alloc"){        // 0uuu000a
+    makeCompound(container,p.idx,[
+      ["Mode",["Poly","Mono"],v=>v&1,(old,sel)=>(old&0x70)|sel],
+      ["Unisono",["off","dual","3","4","5","6"],v=>(v>>4)&7,(old,sel)=>(old&1)|(sel<<4)],
+    ]);
+  }else if(p.t==="fx"){ buildFX(container,p.fx); }
+  else if(p.t==="modifiers"){ buildModifiers(container); }
+  else if(p.t==="matrix"){ buildMatrix(container); }
+}
+function makeCompound(container,idx,fields){
+  const ups=[];
+  for(const [label,opts,get,set] of fields){
+    const row=document.createElement("div");row.className="prow";
+    const name=document.createElement("div");name.className="pname";name.textContent=label;
+    const sel=document.createElement("select");
+    opts.forEach((o,i)=>{const el=document.createElement("option");el.value=i;el.textContent=o;sel.appendChild(el);});
+    sel.onchange=()=>sendParam(idx,set(state[idx],+sel.value));
+    row.append(name,sel,document.createElement("div"));container.appendChild(row);
+    ups.push(()=>sel.value=get(state[idx]));
+  }
+  controls[idx]=()=>ups.forEach(u=>u());
+}
+function buildFX(container,n){
+  const base=n===1?128:144;
+  const types=n===1?FXTYPE1:FXTYPE2;
+  const typeRow=document.createElement("div");typeRow.className="prow";
+  const tn=document.createElement("div");tn.className="pname";tn.textContent="Type";
+  const sel=document.createElement("select");
+  types.forEach((o,i)=>{const el=document.createElement("option");el.value=i;el.textContent=o;sel.appendChild(el);});
+  typeRow.append(tn,sel,document.createElement("div"));container.appendChild(typeRow);
+  const mixRow=document.createElement("div");container.appendChild(mixRow);
+  makeRow(R(base+1,"Mix"),mixRow);
+  const dyn=document.createElement("div");container.appendChild(dyn);
+  function rebuild(){
+    dyn.innerHTML="";
+    const t=state[base];
+    for(const [off,label,kind] of (FXPARAMS[t]||[])){
+      const idx=base+off;
+      if(kind==="pol") makeRow(C(idx,label,["positive","negative"]),dyn);
+      else if(kind==="curve") makeRow(C(idx,label,DRIVECURVE.slice(0,12)),dyn);
+      else if(kind==="dlylen") makeRow(R(idx,label,0,29),dyn);
+      else if(kind==="s64") makeRow(R(idx,label,0,127,"s64"),dyn);
+      else makeRow(R(idx,label),dyn);
+      controls[idx]();
+    }
+  }
+  sel.onchange=()=>{sendParam(base,+sel.value);rebuild();};
+  controls[base]=()=>{sel.value=state[base];rebuild();};
+}
+function buildModifiers(container){
+  for(let m=0;m<4;m++){
+    const b=245+m*4;
+    const h=document.createElement("div");h.className="subhead";h.textContent="Modifier "+(m+1);
+    container.appendChild(h);
+    makeRow(C(b,"Source A",MODSRC),container);
+    makeRow(C(b+1,"Source B",MODSRC),container);
+    makeRow(C(b+2,"Operation",MODOP),container);
+    makeRow(R(b+3,"Constant",0,127,"s64"),container);
+  }
+}
+function buildMatrix(container){
+  const head=document.createElement("div");head.className="matrixrow";
+  head.innerHTML='<div class="idx">#</div><div class="pname">Source</div><div class="pname">Destination</div><div class="pname">Amount</div><div></div>';
+  container.appendChild(head);
+  for(let m=0;m<16;m++){
+    const b=261+m*3;
+    const row=document.createElement("div");row.className="matrixrow";
+    const num=document.createElement("div");num.className="idx";num.textContent=m+1;
+    const src=document.createElement("select");
+    MODSRC.forEach((o,i)=>{const el=document.createElement("option");el.value=i;el.textContent=o;src.appendChild(el);});
+    const dst=document.createElement("select");
+    MODDST.forEach((o,i)=>{const el=document.createElement("option");el.value=i;el.textContent=o;dst.appendChild(el);});
+    const amt=document.createElement("input");amt.type="range";amt.min=0;amt.max=127;
+    const val=document.createElement("div");val.className="pval";
+    src.onchange=()=>sendParam(b,+src.value);
+    dst.onchange=()=>sendParam(b+1,+dst.value);
+    amt.oninput=()=>{sendParam(b+2,+amt.value);val.textContent=F.s64(+amt.value);};
+    amt.ondblclick=()=>{amt.value=64;amt.oninput();};
+    row.append(num,src,dst,amt,val);container.appendChild(row);
+    controls[b]=()=>src.value=state[b];
+    controls[b+1]=()=>dst.value=state[b+1];
+    controls[b+2]=()=>{amt.value=state[b+2];val.textContent=F.s64(state[b+2]);};
+  }
+}
+
+function buildUI(){
+  const root=$("sections");
+  for(const sec of SECTIONS){
+    const panel=document.createElement("div");
+    panel.className="panel"+(sec.wide?" wide":"");
+    const h=document.createElement("h2");h.textContent=sec.title;panel.appendChild(h);
+    for(const p of sec.params) makeRow(p,panel);
+    root.appendChild(panel);
+  }
+  const cat=$("patchcat");
+  CATEGORY.forEach((c,i)=>{const o=document.createElement("option");o.value=i;o.textContent=c;cat.appendChild(o);});
+  cat.onchange=()=>sendParam(379,+cat.value);
+  $("patchname").onchange=e=>{
+    const nm=(e.target.value+"                ").slice(0,16);
+    for(let i=0;i<16;i++) sendParam(363+i,nm.charCodeAt(i));
+  };
+  buildKeyboard();
+}
+function patchName(){
+  let s="";for(let i=363;i<379;i++)s+=String.fromCharCode(state[i]>=32?state[i]:32);
+  return s.trimEnd();
+}
+function refreshUI(only){
+  if(only!==undefined){ if(controls[only])controls[only](); return; }
+  for(const k in controls) controls[k]();
+  $("patchname").value=patchName();
+  $("patchcat").value=state[379];
+}
+
+/* ---------- on-screen keyboard ---------- */
+function buildKeyboard(){
+  const kbd=$("kbd"); const start=48; // C3, 2 octaves
+  for(let o=0;o<2;o++){
+    for(let d=0;d<7;d++){
+      const wn=[0,2,4,5,7,9,11][d]+start+o*12;
+      const wrap=document.createElement("div");wrap.className="wkwrap";
+      const wk=document.createElement("div");wk.className="wk";wk.style.height="100%";
+      bindKey(wk,wn); wrap.appendChild(wk);
+      const bOff=[1,3,-1,6,8,10,-1][d];
+      if(bOff>=0){const bk=document.createElement("div");bk.className="bk";bindKey(bk,start+o*12+bOff);wrap.appendChild(bk);}
+      kbd.appendChild(wrap);
+    }
+  }
+  const last=document.createElement("div");last.className="wkwrap";
+  const wk=document.createElement("div");wk.className="wk";wk.style.height="100%";
+  bindKey(wk,start+24);last.appendChild(wk);kbd.appendChild(last);
+}
+function bindKey(el,note){
+  el.onpointerdown=e=>{e.preventDefault();el.classList.add("on");noteOn(note);};
+  const off=()=>{el.classList.remove("on");noteOff(note);};
+  el.onpointerup=off; el.onpointerleave=off;
+}
+
+/* ---------- init / file io ---------- */
+function initPatch(){
+  state.fill(0);
+  const set=(i,v)=>state[i]=v;
+  [1,17,33].forEach(b=>{set(b,64);set(b+1,64);set(b+2,64);set(b+3,66);set(b+4,96);set(b+8,64);set(b+10,64);});
+  set(8,2);                              // Osc1 saw
+  set(50,0);set(51,64);set(57,20);
+  set(61,127);set(62,64);set(63,0);set(64,64);set(65,0);set(66,64);set(67,0);set(68,64);set(69,64);set(71,0);set(72,64);
+  [77,97].forEach(b=>{set(b+1,127);set(b+9,64);set(b+10,64);set(b+11,64);set(b+13,64);set(b+16,64);set(b+18,64);});
+  set(77,1);                             // F1 LP24
+  set(121,114);set(122,64);set(124,64);
+  [196,208,220,232].forEach(b=>{set(b+4,127);set(b+5,50);set(b+6,b===208?127:64);set(b+8,64);set(b+9,15);});
+  [160,172,184].forEach(b=>{set(b+1,64);set(b+7,64);set(b+10,64);});
+  set(129,0);set(145,20);set(144,8);set(146,64);set(147,64);set(148,64);set(151,127);set(153,64);set(154,64);
+  for(let m=0;m<4;m++){set(245+m*4+3,64);}
+  for(let m=0;m<16;m++){set(261+m*3+2,64);}
+  set(314,11);set(315,43);set(316,0);set(320,64);set(323,15);set(326,55);
+  const nm="Init            ";
+  for(let i=0;i<16;i++)set(363+i,nm.charCodeAt(i));
+  refreshUI();
+}
+$("btnInit").onclick=()=>{initPatch();sendAll();};
+$("btnRequest").onclick=requestDump;
+$("btnSendAll").onclick=sendAll;
+$("btnSave").onclick=()=>{
+  const blob=new Blob([buildSNDD()],{type:"application/octet-stream"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=(patchName()||"blofeld_patch").replace(/[^\w\- ]/g,"").trim().replace(/ +/g,"_")+".syx";
+  a.click();URL.revokeObjectURL(a.href);
+};
+$("btnLoad").onclick=()=>$("fileinput").click();
+$("fileinput").onchange=async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const buf=new Uint8Array(await f.arrayBuffer());
+  // find first SNDD message in file
+  for(let i=0;i<buf.length-390;i++){
+    if(buf[i]===0xF0&&buf[i+1]===IDW&&buf[i+2]===IDE&&buf[i+4]===0x10){
+      for(let k=0;k<383;k++)state[k]=buf[i+7+k];
+      refreshUI(); sendAll();
+      setStatus("파일 로드: "+patchName(),true);
+      e.target.value=""; return;
+    }
+  }
+  alert("이 파일에서 Blofeld SNDD 덤프를 찾지 못했습니다.");
+  e.target.value="";
+};
+
+buildUI(); initPatch(); initMIDI();
+</script>
+</body>
+</html>
